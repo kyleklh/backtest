@@ -18,7 +18,6 @@ MarketEvent → Strategy → SignalEvent → Portfolio → OrderEvent → Broker
 | `broker/` | Order modeling, fill simulation, commission & slippage |
 | `portfolio/` | Positions, cash, holdings, PnL tracking |
 | `analytics/` | Performance metrics, equity curve, reporting |
-| `utils/` | Logging and configuration |
 
 ## Quick start
 
