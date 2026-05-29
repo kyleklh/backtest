@@ -1,23 +1,24 @@
 """Buy-and-hold benchmark strategy.
 
-Goes long each symbol on its first bar and never trades again. Useful as a
-baseline to compare more active strategies against.
+Emits a single BUY SignalEvent on the first bar and never trades again. Serves
+as the baseline every active strategy is measured against.
 """
 
 from strategies.base_strategy import BaseStrategy
+from engine.events import SignalEvent
 
 class BuyAndHoldStrategy(BaseStrategy):
-    def __init__(self):
+    def __init__(self, data_handler, events, symbol="AAPL"):
         super().__init__()
+        self.data_handler = data_handler
+        self.events = events
+        self.symbol = symbol
         self.in_position = False
 
-    def on_bar(self, bar):
+    def calculate_signals(self, event):
+        if event.type != "MARKET":
+            return
         if not self.in_position:
+            bar = self.data_handler.get_latest_bar()
+            self.events.put(SignalEvent(self.symbol, bar.name, "BUY"))
             self.in_position = True
-            print(f"BUY signal at {bar.name} price: {bar['close']}")
-            return "BUY"
-            
-        else:
-            # print(f"HOLD signal at {bar.name} price: {bar['close']}")
-            return None
-            

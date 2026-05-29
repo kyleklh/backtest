@@ -1,49 +1,50 @@
-"""
-MA Crossover Strategy
+"""Moving-average crossover strategy.
 
-A simple moving average crossover strategy. Generates a buy signal when the short-term moving average crosses above the long-term moving average, and a sell
-signal when the short-term moving average crosses below the long-term moving average.
+Reacts to MarketEvents: on each new bar it reads the trailing price window
+from the DataHandler, computes a short and long moving average, and detects
+when their relationship flips. A short-above-long crossover emits a BUY
+SignalEvent; a short-below-long crossover emits a SELL. It only acts on the
+moment of the cross, not the standing relationship, and never holds more than
+one position at a time.
+
+It holds no price buffer of its own — it asks the DataHandler for history
+(which can never expose future bars) and pushes SignalEvents onto the queue.
 """
 
-from collections import deque
 from strategies.base_strategy import BaseStrategy
+from engine.events import SignalEvent
 
 class MACrossoverStrategy(BaseStrategy):
-    def __init__(self, short_window = 20, long_window = 50):
+    def __init__(self, data_handler, events, symbol="AAPL", short_window = 20, long_window = 50):
         super().__init__()
+        self.data_handler = data_handler
+        self.events = events
+        self.symbol = symbol
         self.short_window = short_window
         self.long_window = long_window
-        self.prices = deque(maxlen=long_window)
         self.in_position = False
         self.prev_short_above = None
 
+    def calculate_signals(self, event):
+        if event.type != "MARKET":
+            return
 
-    def on_bar(self, bar):
-        self.prices.append(bar['close'])
+        bars = self.data_handler.get_latest_bars(self.long_window)
+        if len(bars) < self.long_window:           # not enough history yet
+            return
 
-        # 1. not enough data to form long MA --> no signal
-        if len(self.prices) < self.long_window:
-            return None
-        
-        # 2.  compute the two moving averages
-        prices = list(self.prices)
-        short_ma = sum(prices[-self.short_window:]) / self.short_window
-        long_ma = sum(prices) / self.long_window
-
-        # 3. current relationship
+        closes = bars["close"]
+        short_ma = closes[-self.short_window:].mean()    # last short_window closes
+        long_ma  = closes.mean()           # all long_window closes
         short_above = short_ma > long_ma
 
-        # 4. detect crossover vs last bar, emit only on a flip
-        signal = None
+        timestamp = bars.index[-1]
         if self.prev_short_above is not None:
             if short_above and not self.prev_short_above and not self.in_position:
-                signal = "BUY"
+                self.events.put(SignalEvent(self.symbol, timestamp, "BUY"))   # entering
                 self.in_position = True
             elif not short_above and self.prev_short_above and self.in_position:
-                signal = "SELL"
+                self.events.put(SignalEvent(self.symbol, timestamp, "SELL"))   # exiting
                 self.in_position = False
 
         self.prev_short_above = short_above
-        return signal
-
-
