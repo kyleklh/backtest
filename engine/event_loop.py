@@ -11,17 +11,40 @@ Routing:
     FillEvent   -> Portfolio.on_fill
 """
 
+import queue
 
 class EventLoop:
-    def __init__(self, data, strategy, portfolio, broker, event_queue):
-        self.data = data
+    def __init__(self, data, strategy, portfolio, broker, events):
+        self.data_handler = data
         self.strategy = strategy
         self.portfolio = portfolio
-        # self.broker = broker
-        # self.event_queue = event_queue
+        self.broker = broker
+        self.events = events
 
     def run(self):
-        for _, bar in self.data.iterrows():
-            signal = self.strategy.on_bar(bar)
-            self.portfolio.update(bar, signal)
+        while self.data_handler.continue_backtest:
+            # OUTER: advance time - pushes one MarketEvent
+            self.data_handler.update_bars()
+
+            # INNER: drain every event this bar triggered
+            while True:
+                try:
+                    event = self.events.get(False) # non-blocking get
+                except queue.Empty:
+                    break
+                else:
+                    self._route(event)
+
+
+    def _route(self, event):
+        """Route an event to the right component."""
+        if event.type == 'MARKET':
+            self.strategy.calculate_signals(event)
+            self.portfolio.update_market(event)
+        elif event.type == 'SIGNAL':
+            self.portfolio.on_signal(event)
+        elif event.type == 'ORDER':
+            self.broker.execute_order(event)
+        elif event.type == 'FILL':
+            self.portfolio.on_fill(event)
 

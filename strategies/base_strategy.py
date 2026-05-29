@@ -7,15 +7,15 @@ Subclasses implement: calculate_signals(event)
 """
 
 from abc import ABC, abstractmethod
-from typing import Optional
 
 class BaseStrategy(ABC):
     def __init__(self):
         pass
 
     @abstractmethod
-    def on_bar(self, bar) -> Optional[str]:
+    def calculate_signals(self, event):
         """
-        Called by the event loop on every new market bar.
+        Called by the event loop on every MarketEvent. Reads the latest bar(s)
+        from the DataHandler and pushes SignalEvents onto the queue.
         """
         pass
