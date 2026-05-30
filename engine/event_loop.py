@@ -34,13 +34,17 @@ class EventLoop:
                     break
                 else:
                     self._route(event)
+            
+            if self.data_handler.continue_backtest:
+                self.portfolio.update_market(None)
+
 
 
     def _route(self, event):
         """Route an event to the right component."""
         if event.type == 'MARKET':
+            self.broker.process_pending_orders(event)   # NEW: fill any pending orders first
             self.strategy.calculate_signals(event)
-            self.portfolio.update_market(event)
         elif event.type == 'SIGNAL':
             self.portfolio.on_signal(event)
         elif event.type == 'ORDER':
