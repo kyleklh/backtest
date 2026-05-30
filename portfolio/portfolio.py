@@ -14,19 +14,23 @@ portfolio simply trusts the fill price and commission the broker reports.
 from engine.events import OrderEvent
 
 class Portfolio:
-    def __init__(self, data_handler, events, initial_capital = 100000):
+    def __init__(self, data_handler, events, initial_capital = 100000, commission_rate = 0.001, slippage_rate = 0.0005):
         self.data_handler = data_handler
         self.events = events
         self.initial_capital = initial_capital
         self.cash = initial_capital
         self.position = 0
+        self.commission_rate = commission_rate
+        self.slippage_rate = slippage_rate
         self.equity_curve = []
 
     def on_signal(self, event):
         """SignalEvent -> size the trade -> push an OrderEvent."""
         price = self.data_handler.get_latest_bar_value('close')
         if event.direction == 'BUY':
-            quantity = self.cash / price         # all cash / price
+            all_in_price = price * (1 + self.slippage_rate) * (1 + self.commission_rate)
+            quantity = self.cash / all_in_price  # adjust for slippage and commission
+            
         elif event.direction == 'SELL':
             quantity = self.position              # sell entire position
         else: 
