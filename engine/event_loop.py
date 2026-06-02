@@ -14,9 +14,9 @@ Routing:
 import queue
 
 class EventLoop:
-    def __init__(self, data, strategy, portfolio, broker, events):
+    def __init__(self, data, strategies, portfolio, broker, events):
         self.data_handler = data
-        self.strategy = strategy
+        self.strategies = strategies      # one strategy instance per symbol
         self.portfolio = portfolio
         self.broker = broker
         self.events = events
@@ -43,8 +43,9 @@ class EventLoop:
     def _route(self, event):
         """Route an event to the right component."""
         if event.type == 'MARKET':
-            self.broker.process_pending_orders(event)   # NEW: fill any pending orders first
-            self.strategy.calculate_signals(event)
+            self.broker.process_pending_orders(event)   # fill any pending orders first
+            for strategy in self.strategies:            # fan out to every symbol's strategy
+                strategy.calculate_signals(event)
         elif event.type == 'SIGNAL':
             self.portfolio.on_signal(event)
         elif event.type == 'ORDER':

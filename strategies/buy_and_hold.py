@@ -19,6 +19,6 @@ class BuyAndHoldStrategy(BaseStrategy):
         if event.type != "MARKET":
             return
         if not self.in_position:
-            bar = self.data_handler.get_latest_bar()
+            bar = self.data_handler.get_latest_bar(self.symbol)
             self.events.put(SignalEvent(self.symbol, bar.name, "BUY"))
             self.in_position = True

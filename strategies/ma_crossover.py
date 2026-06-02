@@ -29,7 +29,7 @@ class MACrossoverStrategy(BaseStrategy):
         if event.type != "MARKET":
             return
 
-        bars = self.data_handler.get_latest_bars(self.long_window)
+        bars = self.data_handler.get_latest_bars(self.symbol, self.long_window)
         if len(bars) < self.long_window:           # not enough history yet
             return
 
