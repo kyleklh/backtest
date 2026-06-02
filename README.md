@@ -132,7 +132,7 @@ timing), and a full end-to-end smoke test.
 
 ## Design notes & simplifications
 
-These are deliberate MVP choices, not oversights:
+These are deliberate choices, not oversights:
 
 - **Shared-timeline alignment** uses the *intersection* of symbols' dates —
   correct-by-construction (never fabricates a price) but lossy across mismatched
