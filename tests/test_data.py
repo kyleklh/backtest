@@ -14,7 +14,7 @@ def make_handler(n_bars=10):
         "close":  [10.5 + i for i in range(n_bars)],
         "volume": [1000] * n_bars,
     }, index=pd.date_range("2020-01-01", periods=n_bars))
-    return DataHandler(df, "TEST", queue.Queue())
+    return DataHandler({"TEST": df}, ["TEST"], queue.Queue())
 
 
 def test_get_latest_bars_never_returns_future_rows():
@@ -26,7 +26,7 @@ def test_get_latest_bars_never_returns_future_rows():
     handler.update_bars()
 
     # ask for 10 bars — we should only get 3 (no future data)
-    bars = handler.get_latest_bars(10)
+    bars = handler.get_latest_bars("TEST", 10)
 
     assert len(bars) == 3                       # only as many as revealed
-    assert bars.iloc[-1]["close"] == handler.df.iloc[2]["close"]   # last bar = cursor's bar
+    assert bars.iloc[-1]["close"] == handler.data["TEST"].iloc[2]["close"]   # last bar = cursor's bar
