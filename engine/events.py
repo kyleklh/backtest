@@ -31,12 +31,13 @@ class SignalEvent(Event):
 
 class OrderEvent(Event):
     """Portfolio's sized order, ready for the broker."""
-    def __init__(self, symbol, order_type, quantity, direction):
+    def __init__(self, symbol, order_type, quantity, direction, limit_price=None):
         self.type = 'ORDER'
         self.symbol = symbol
-        self.order_type = order_type  # "MKT" for now (market order)
-        self.quantity = quantity      # number of share
-        self.direction = direction    # 'BUY' or 'SELL'
+        self.order_type = order_type    # "MKT" (market) or "LMT" (limit)
+        self.quantity = quantity        # number of shares
+        self.direction = direction      # 'BUY' or 'SELL'
+        self.limit_price = limit_price  # required for "LMT"; ignored for "MKT"
 
 
 class FillEvent(Event):
