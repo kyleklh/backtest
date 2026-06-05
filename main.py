@@ -18,8 +18,9 @@ from portfolio.portfolio import Portfolio
 from broker.execution import SimulatedBroker
 from strategies.buy_and_hold import BuyAndHoldStrategy
 from strategies.ma_crossover import MACrossoverStrategy
-from analytics.metrics import (max_drawdown, sharpe_ratio, cagr,
-                               annualized_volatility, avg_win_loss)
+from analytics.metrics import (max_drawdown, sharpe_ratio, sortino_ratio,
+                               calmar_ratio, cagr, annualized_volatility,
+                               avg_win_loss, beta, alpha, information_ratio)
 from analytics.plot import plot_equity_curve
 
 
@@ -45,14 +46,20 @@ def run_backtest(data, strategy_factory, cfg):
     return portfolio
 
 
-def report(label, portfolio, show_trades=False):
+def report(label, portfolio, risk_free_rate=0.0, benchmark_curve=None, show_trades=False):
     ec = portfolio.equity_curve
     print(f"\n{label}")
     print(f"  Total return:   {portfolio.total_return():.2%}")
     print(f"  CAGR:           {cagr(ec):.2%}")
     print(f"  Max drawdown:   {max_drawdown(ec):.2%}")
     print(f"  Ann. vol:       {annualized_volatility(ec):.2%}")
-    print(f"  Sharpe ratio:   {sharpe_ratio(ec):.2f}")
+    print(f"  Sharpe ratio:   {sharpe_ratio(ec, risk_free_rate=risk_free_rate):.2f}")
+    print(f"  Sortino ratio:  {sortino_ratio(ec, risk_free_rate=risk_free_rate):.2f}")
+    print(f"  Calmar ratio:   {calmar_ratio(ec):.2f}")
+    if benchmark_curve is not None:
+        print(f"  Alpha (ann.):   {alpha(ec, benchmark_curve, risk_free_rate=risk_free_rate):.2%}")
+        print(f"  Beta:           {beta(ec, benchmark_curve):.2f}")
+        print(f"  Info ratio:     {information_ratio(ec, benchmark_curve):.2f}")
     print(f"  Time in market: {portfolio.time_in_market():.0%}")
     print(f"  Realized PnL:   {portfolio.realized_pnl:,.2f}")
 
@@ -76,11 +83,17 @@ def main():
     cfg = Config()
     data = {t: load_data(download_data(t, cfg.start, cfg.end)) for t in cfg.tickers}
 
+    # benchmark price series (e.g. SPY) for alpha / beta / information ratio
+    bench_df = load_data(download_data(cfg.benchmark, cfg.start, cfg.end))
+    benchmark_curve = list(zip(bench_df.index, bench_df["close"]))
+
     bh = run_backtest(data, BuyAndHoldStrategy, cfg)
     ma = run_backtest(data, MACrossoverStrategy, cfg)
 
-    report("Buy & Hold", bh)
-    report("MA Crossover", ma)
+    report("Buy & Hold", bh, risk_free_rate=cfg.risk_free_rate,
+           benchmark_curve=benchmark_curve)
+    report("MA Crossover", ma, risk_free_rate=cfg.risk_free_rate,
+           benchmark_curve=benchmark_curve, show_trades=True)
 
     plot_equity_curve({
         "Buy & Hold": bh.equity_curve,
