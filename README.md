@@ -140,4 +140,5 @@ These are deliberate choices, not oversights:
 - **Equal-split sizing** allocates `current_equity / N` per symbol. A single cash
   pool, not per-symbol sub-accounts.
 - **Limit orders rest GTC** (good-till-cancelled) — they never expire.
-- **Sharpe assumes a 0% risk-free rate.**
+- **Risk-free rate** is the time-varying 13-week T-bill yield (`^IRX`); metrics also
+  accept a constant if you prefer.
