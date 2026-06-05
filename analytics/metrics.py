@@ -13,27 +13,37 @@ def max_drawdown(equity_curve):
 
     return drawdown.min()
 
-def sharpe_ratio(equity_curve, periods_per_year=252, risk_free_rate=0.0):
+def _per_period_rf(risk_free_rate, index, periods_per_year):
+    """Per-period risk-free return aligned to `index`. Accepts either a scalar
+    annual rate (broadcast to every period) or a pandas Series of annual rates
+    (reindexed onto the return dates and forward-filled) — so a time-varying
+    risk-free curve works as a drop-in for the constant."""
+    if isinstance(risk_free_rate, pd.Series):
+        annual = risk_free_rate.reindex(index).ffill().fillna(0.0)
+        return annual / periods_per_year
+    return risk_free_rate / periods_per_year
+
+def sharpe_ratio(equity_curve, periods_per_year=252, risk_free_rate: "float | pd.Series" = 0.0):
     """Excess return per unit of total volatility, annualized. risk_free_rate
-    is an annual rate; it's converted to a per-period hurdle and subtracted
-    from each return before measuring reward-to-risk."""
+    is an annual rate (scalar) or a Series of annual rates; it's converted to a
+    per-period hurdle and subtracted from each return."""
     equity = pd.Series(dict(equity_curve), dtype = float)
     daily_returns = equity.pct_change().dropna()
-    rf_period = risk_free_rate / periods_per_year
-    excess = daily_returns - rf_period
+    rf = _per_period_rf(risk_free_rate, daily_returns.index, periods_per_year)
+    excess = daily_returns - rf
     std = excess.std()
     if std == 0 or np.isnan(std):
         return float("nan")
     return (excess.mean() / std) * np.sqrt(periods_per_year)
 
-def sortino_ratio(equity_curve, periods_per_year=252, risk_free_rate=0.0):
+def sortino_ratio(equity_curve, periods_per_year=252, risk_free_rate: "float | pd.Series" = 0.0):
     """Like Sharpe, but only downside deviation counts as risk — upside
     volatility isn't penalized. Uses the target-downside-deviation form:
     sqrt(mean of squared shortfalls below the risk-free hurdle)."""
     equity = pd.Series(dict(equity_curve), dtype=float)
     daily_returns = equity.pct_change().dropna()
-    rf_period = risk_free_rate / periods_per_year
-    excess = daily_returns - rf_period
+    rf = _per_period_rf(risk_free_rate, daily_returns.index, periods_per_year)
+    excess = daily_returns - rf
     shortfall = np.minimum(excess, 0.0)             # 0 on up days, negative on down days
     downside_dev = np.sqrt((shortfall ** 2).mean())
     if downside_dev == 0 or np.isnan(downside_dev):
@@ -80,7 +90,7 @@ def beta(equity_curve, benchmark_curve):
         return float("nan")
     return strat.cov(bench) / var
 
-def alpha(equity_curve, benchmark_curve, periods_per_year=252, risk_free_rate=0.0):
+def alpha(equity_curve, benchmark_curve, periods_per_year=252, risk_free_rate: "float | pd.Series" = 0.0):
     """Annualized excess return not explained by market exposure (CAPM alpha):
     (strat - rf) - beta * (bench - rf), averaged per period and annualized."""
     strat, bench = _aligned_returns(equity_curve, benchmark_curve)
@@ -88,8 +98,8 @@ def alpha(equity_curve, benchmark_curve, periods_per_year=252, risk_free_rate=0.
     if var == 0 or np.isnan(var):
         return float("nan")
     b = strat.cov(bench) / var
-    rf = risk_free_rate / periods_per_year
-    alpha_period = (strat.mean() - rf) - b * (bench.mean() - rf)
+    rf = _per_period_rf(risk_free_rate, strat.index, periods_per_year)
+    alpha_period = (strat - rf).mean() - b * (bench - rf).mean()
     return alpha_period * periods_per_year
 
 def information_ratio(equity_curve, benchmark_curve, periods_per_year=252):

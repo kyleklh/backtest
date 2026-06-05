@@ -37,6 +37,17 @@ def test_calmar_is_cagr_over_max_drawdown():
     assert calmar_ratio(ec) == pytest.approx(cagr(ec) / abs(max_drawdown(ec)))
 
 
+def test_sharpe_accepts_time_varying_risk_free_series():
+    ec = curve([100, 102, 101, 104, 103, 106])
+    dates = pd.Series(dict(ec)).index
+    rf_series = pd.Series(0.10, index=dates)          # 10% annual as a time series
+    # a positive hurdle lowers Sharpe vs rf=0
+    assert sharpe_ratio(ec, risk_free_rate=rf_series) < sharpe_ratio(ec, risk_free_rate=0.0)
+    # a *constant* series must match the scalar form exactly
+    assert sharpe_ratio(ec, risk_free_rate=rf_series) == pytest.approx(
+        sharpe_ratio(ec, risk_free_rate=0.10))
+
+
 def _scaled_curve(levels, factor):
     """A curve whose per-period returns are `factor` times those of `levels`."""
     base = pd.Series(levels, dtype=float).pct_change().dropna()

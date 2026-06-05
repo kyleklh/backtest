@@ -19,5 +19,6 @@ class Config:
     initial_capital: float = 100_000
     commission_rate: float = 0.001
     slippage_rate: float = 0.0005
-    risk_free_rate: float = 0.0     # annual; used by Sharpe / Sortino
+    risk_free_rate: float = 0.0     # annual; constant fallback if no rf series is loaded
+    risk_free_symbol: str = "^IRX"  # 13-week T-bill yield — time-varying risk-free rate
     benchmark: str = "SPY"          # symbol to measure alpha/beta/info ratio against

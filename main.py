@@ -9,6 +9,8 @@ performance report, and plots the equity curves for comparison.
 
 import queue
 
+import pandas as pd
+
 from config import Config
 from data.downloader import download_data
 from data.loader import load_data
@@ -46,7 +48,8 @@ def run_backtest(data, strategy_factory, cfg):
     return portfolio
 
 
-def report(label, portfolio, risk_free_rate=0.0, benchmark_curve=None, show_trades=False):
+def report(label, portfolio, risk_free_rate: "float | pd.Series" = 0.0,
+           benchmark_curve=None, show_trades=False):
     ec = portfolio.equity_curve
     print(f"\n{label}")
     print(f"  Total return:   {portfolio.total_return():.2%}")
@@ -87,12 +90,16 @@ def main():
     bench_df = load_data(download_data(cfg.benchmark, cfg.start, cfg.end))
     benchmark_curve = list(zip(bench_df.index, bench_df["close"]))
 
+    # time-varying risk-free rate: 13-week T-bill yield (^IRX), percent -> decimal
+    rf_df = load_data(download_data(cfg.risk_free_symbol, cfg.start, cfg.end))
+    risk_free = rf_df["close"] / 100.0
+
     bh = run_backtest(data, BuyAndHoldStrategy, cfg)
     ma = run_backtest(data, MACrossoverStrategy, cfg)
 
-    report("Buy & Hold", bh, risk_free_rate=cfg.risk_free_rate,
+    report("Buy & Hold", bh, risk_free_rate=risk_free,
            benchmark_curve=benchmark_curve)
-    report("MA Crossover", ma, risk_free_rate=cfg.risk_free_rate,
+    report("MA Crossover", ma, risk_free_rate=risk_free,
            benchmark_curve=benchmark_curve, show_trades=True)
 
     plot_equity_curve({
