@@ -39,7 +39,7 @@ def test_crossover_fires_only_on_the_cross():
                            short_window=2, long_window=3)
 
     assert len(signals) == 2
-    assert signals[0].direction == "BUY"
-    assert signals[1].direction == "SELL"
+    assert signals[0].direction == "LONG"
+    assert signals[1].direction == "EXIT"
 
 

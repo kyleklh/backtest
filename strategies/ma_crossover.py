@@ -41,10 +41,10 @@ class MACrossoverStrategy(BaseStrategy):
         timestamp = bars.index[-1]
         if self.prev_short_above is not None:
             if short_above and not self.prev_short_above and not self.in_position:
-                self.events.put(SignalEvent(self.symbol, timestamp, "BUY"))   # entering
+                self.events.put(SignalEvent(self.symbol, timestamp, "LONG"))   # entering
                 self.in_position = True
             elif not short_above and self.prev_short_above and self.in_position:
-                self.events.put(SignalEvent(self.symbol, timestamp, "SELL"))   # exiting
+                self.events.put(SignalEvent(self.symbol, timestamp, "EXIT"))   # going flat
                 self.in_position = False
 
         self.prev_short_above = short_above

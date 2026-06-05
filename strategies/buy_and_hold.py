@@ -20,5 +20,5 @@ class BuyAndHoldStrategy(BaseStrategy):
             return
         if not self.in_position:
             bar = self.data_handler.get_latest_bar(self.symbol)
-            self.events.put(SignalEvent(self.symbol, bar.name, "BUY"))
+            self.events.put(SignalEvent(self.symbol, bar.name, "LONG"))
             self.in_position = True

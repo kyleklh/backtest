@@ -17,6 +17,7 @@ from data.loader import load_data
 from engine.data_handler import DataHandler
 from engine.event_loop import EventLoop
 from portfolio.portfolio import Portfolio
+from portfolio.sizing import EqualWeightSizer
 from broker.execution import SimulatedBroker
 from strategies.buy_and_hold import BuyAndHoldStrategy
 from strategies.ma_crossover import MACrossoverStrategy
@@ -35,6 +36,7 @@ def run_backtest(data, strategy_factory, cfg):
     data_handler = DataHandler(data, symbols, events)
     strategies = [strategy_factory(data_handler, events, s) for s in symbols]
     portfolio = Portfolio(data_handler, events, symbols,
+                          sizer=EqualWeightSizer(len(symbols)),
                           initial_capital=cfg.initial_capital,
                           commission_rate=cfg.commission_rate,
                           slippage_rate=cfg.slippage_rate)

@@ -7,6 +7,7 @@ import queue
 from engine.data_handler import DataHandler
 from engine.event_loop import EventLoop
 from portfolio.portfolio import Portfolio
+from portfolio.sizing import EqualWeightSizer
 from broker.execution import SimulatedBroker
 from strategies.buy_and_hold import BuyAndHoldStrategy
 
@@ -24,8 +25,8 @@ def test_buy_and_hold_end_to_end():
     handler = DataHandler({"TEST": df}, ["TEST"], events)
     strategy = BuyAndHoldStrategy(handler, events, "TEST")
     # zero costs so the final number is hand-computable
-    portfolio = Portfolio(handler, events, ["TEST"], initial_capital=1000,
-                          commission_rate=0, slippage_rate=0)
+    portfolio = Portfolio(handler, events, ["TEST"], sizer=EqualWeightSizer(1),
+                          initial_capital=1000, commission_rate=0, slippage_rate=0)
     broker = SimulatedBroker(handler, events, commission_rate=0, slippage_rate=0)
 
     loop = EventLoop(data=handler, strategies=[strategy],

@@ -8,8 +8,11 @@ MarketEvent it marks the whole book to market and records a point on the equity
 curve.
 
 Cash is a single shared pool; positions and average cost are tracked per
-symbol. Sizing uses an equal split: each BUY targets initial_capital / N (N =
-number of symbols), capped by available cash so it can never overdraw.
+symbol and may be long (positive) or short (negative). Signals express a target
+stance ('LONG', 'SHORT', 'EXIT'); a PositionSizer decides how many shares a full
+position is; the portfolio emits the delta order(s) to move from the current
+position to the target. A reversal goes through flat as two orders, so every
+fill is cleanly either opening (re-average) or closing (realize PnL).
 
 The split between on_signal (intention) and on_fill (reality) is deliberate:
 costs and slippage live in the gap between the order and the fill, so the
@@ -34,12 +37,13 @@ class Trade:
 
 
 class Portfolio:
-    def __init__(self, data_handler, events, symbols, initial_capital = 100000,
+    def __init__(self, data_handler, events, symbols, sizer=None, initial_capital = 100000,
                  commission_rate = 0.001, slippage_rate = 0.0005):
         self.data_handler = data_handler
         self.events = events
         self.symbols = symbols
         self.num_symbols = len(symbols)
+        self.sizer = sizer           # PositionSizer; required for on_signal, not on_fill
         self.initial_capital = initial_capital
         self.cash = initial_capital
         self.position = {s: 0 for s in symbols}    # shares held per symbol
@@ -53,49 +57,86 @@ class Portfolio:
         self.bars_invested = 0       # bars where at least one position was held
 
     def on_signal(self, event):
-        """SignalEvent -> size the trade -> push an OrderEvent."""
+        """SignalEvent -> translate the target stance into a target position,
+        then emit the delta order(s) to reach it."""
         symbol = event.symbol
-        price = self.data_handler.get_latest_bar_value(symbol, 'close')
-        if event.direction == 'BUY':
-            all_in_price = price * (1 + self.slippage_rate) * (1 + self.commission_rate)
-            # equal split of CURRENT equity (compounding, like zipline/backtrader);
-            # capped by cash on hand so it can never overdraw
-            budget = min(self.current_equity() / self.num_symbols, self.cash)
-            quantity = int(budget / all_in_price)   # whole shares, leftover stays as cash
-        elif event.direction == 'SELL':
-            quantity = self.position[symbol]         # sell entire position
+        stance = event.direction                 # 'LONG' | 'SHORT' | 'EXIT'
+        if stance == "EXIT":
+            target = 0
+        elif stance in ("LONG", "SHORT"):
+            price = self.data_handler.get_latest_bar_value(symbol, 'close')
+            full = self.sizer.size(symbol, price, self)
+            target = full if stance == "LONG" else -full
         else:
             return
+        self._move_to_target(symbol, target)
 
-        if quantity > 0:
-            self.events.put(OrderEvent(symbol, "MKT", quantity, event.direction))
+    def _move_to_target(self, symbol, target):
+        """Emit order(s) to move from the current position to `target`. A sign
+        reversal (long<->short) is split into close-to-flat then open, so each
+        resulting fill is purely opening or purely closing."""
+        current = self.position[symbol]
+        if target == current:
+            return
+        if current != 0 and target != 0 and (current > 0) != (target > 0):
+            self._emit_order(symbol, -current)          # close to flat
+            self._emit_order(symbol, target)            # open the new side
+        else:
+            self._emit_order(symbol, target - current)  # single delta
+
+    def _emit_order(self, symbol, delta):
+        """Queue a market order for a signed share delta (+buy / -sell)."""
+        if delta == 0:
+            return
+        direction = "BUY" if delta > 0 else "SELL"
+        self.events.put(OrderEvent(symbol, "MKT", abs(delta), direction))
 
     def on_fill(self, event):
-        """FillEvent -> apply the actual trade to cash, position, and realized PnL."""
+        """FillEvent -> apply the trade to cash, position, and realized PnL.
+
+        Handles long and short symmetrically. A fill either OPENS/adds (same
+        direction as the position, or from flat) — re-averaging the entry basis
+        — or CLOSES (opposite direction) — realizing PnL. Reversals were already
+        split into two fills upstream, so a fill never crosses through zero."""
         s = event.symbol
-        if event.direction == "BUY":
-            new_cost = self.avg_cost[s] * self.position[s] + event.quantity * event.fill_price + event.commission
-            self.position[s] += event.quantity
-            self.avg_cost[s] = new_cost / self.position[s]
-            self.cash -= event.quantity * event.fill_price + event.commission
-        elif event.direction == "SELL":
-            proceeds = event.quantity * event.fill_price - event.commission
-            cost_basis = event.quantity * self.avg_cost[s]
-            trade_pnl = proceeds - cost_basis
+        qty = event.quantity
+        price = event.fill_price
+        comm = event.commission
+        pos = self.position[s]
+        signed = qty if event.direction == "BUY" else -qty
+        new_pos = pos + signed
+
+        opening = (pos == 0) or ((pos > 0) == (signed > 0))
+        if opening:
+            # fold commission into the entry basis: a long pays more per share,
+            # a short receives less per share
+            if signed > 0:
+                basis = abs(pos) * self.avg_cost[s] + qty * price + comm
+            else:
+                basis = abs(pos) * self.avg_cost[s] + qty * price - comm
+            self.avg_cost[s] = basis / abs(new_pos)
+        else:
+            # closing: long profits when price rises, short when price falls;
+            # the closing commission reduces the realized PnL either way
+            if pos > 0:
+                trade_pnl = qty * (price - self.avg_cost[s]) - comm
+            else:
+                trade_pnl = qty * (self.avg_cost[s] - price) - comm
             self.realized_pnl += trade_pnl
             self.trades.append(Trade(
                 symbol=s,
-                shares=event.quantity,
-                entry_price=self.avg_cost[s],   # avg cost still set; reset happens below
-                exit_price=event.fill_price,
+                shares=qty,
+                entry_price=self.avg_cost[s],
+                exit_price=price,
                 pnl=trade_pnl,
                 exit_date=event.timestamp,
             ))
-            self.position[s] -= event.quantity
-            self.cash += proceeds
-            if abs(self.position[s]) < 1e-9:     # flat -> reset cost basis
-                self.position[s] = 0
+            if abs(new_pos) < 1e-9:              # flat -> reset cost basis
+                new_pos = 0
                 self.avg_cost[s] = 0.0
+
+        self.position[s] = new_pos
+        self.cash -= signed * price + comm
 
     def current_equity(self):
         """Total mark-to-market value: cash + every holding at its latest close."""

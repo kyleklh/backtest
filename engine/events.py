@@ -22,12 +22,13 @@ class MarketEvent(Event):
         self.type = 'MARKET'
 
 class SignalEvent(Event):
-    """Strategy's decision. Says WHAT and WHICH WAY — not how many shares."""
+    """Strategy's decision: the target STANCE for a symbol, not a trade. The
+    portfolio + sizer translate this into orders. Says what, not how many."""
     def __init__(self, symbol, timestamp, direction):
         self.type = 'SIGNAL'
         self.symbol = symbol
         self.timestamp = timestamp
-        self.direction = direction  # 'LONG' or 'EXIT'
+        self.direction = direction  # 'LONG', 'SHORT', or 'EXIT' (flat)
 
 class OrderEvent(Event):
     """Portfolio's sized order, ready for the broker."""
