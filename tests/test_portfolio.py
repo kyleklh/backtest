@@ -3,7 +3,7 @@
 import pandas as pd
 import pytest
 import queue
-from engine.events import FillEvent
+from engine.events import FillEvent, SignalEvent
 from engine.data_handler import DataHandler
 from portfolio.portfolio import Portfolio
 
@@ -88,3 +88,18 @@ def test_reversal_splits_into_two_orders():
     assert events.empty()
     assert (o1.direction, o1.quantity) == ("SELL", 10)   # close the long
     assert (o2.direction, o2.quantity) == ("SELL", 5)    # open the short
+
+
+def test_new_signal_cancels_working_orders():
+    # a fresh signal must cancel any still-working order for that symbol first,
+    # so a stale resting order can't fill late and corrupt the position
+    events = queue.Queue()
+    p = Portfolio(data_handler=None, events=events, symbols=["TEST"],
+                  initial_capital=100000)
+    p.open_orders["TEST"].add(7)                # pretend order 7 is still working
+
+    p.on_signal(SignalEvent("TEST", None, "EXIT"))   # EXIT needs no price/sizer
+
+    e = events.get()                           # first event must be the cancel
+    assert e.type == "CANCEL"
+    assert e.order_id == 7

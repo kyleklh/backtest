@@ -32,13 +32,34 @@ class SignalEvent(Event):
 
 class OrderEvent(Event):
     """Portfolio's sized order, ready for the broker."""
-    def __init__(self, symbol, order_type, quantity, direction, limit_price=None):
+    def __init__(self, symbol, order_type, quantity, direction, limit_price=None,
+                 order_id=None, tif="GTC", expire_date=None):
         self.type = 'ORDER'
         self.symbol = symbol
         self.order_type = order_type    # "MKT" (market) or "LMT" (limit)
         self.quantity = quantity        # number of shares
         self.direction = direction      # 'BUY' or 'SELL'
         self.limit_price = limit_price  # required for "LMT"; ignored for "MKT"
+        self.order_id = order_id        # set by the portfolio; lets the order be cancelled
+        self.tif = tif                  # time-in-force: "GTC" | "DAY" | "GTD"
+        self.expire_date = expire_date  # only for "GTD"
+
+
+class CancelEvent(Event):
+    """Request to cancel a still-working order by id."""
+    def __init__(self, order_id):
+        self.type = 'CANCEL'
+        self.order_id = order_id
+
+
+class OrderStatusEvent(Event):
+    """Broker's report on an order's lifecycle, so the portfolio can keep its
+    set of open orders accurate."""
+    def __init__(self, order_id, symbol, status):
+        self.type = 'STATUS'
+        self.order_id = order_id
+        self.symbol = symbol
+        self.status = status            # 'FILLED' | 'CANCELLED' | 'REJECTED'
 
 
 class FillEvent(Event):

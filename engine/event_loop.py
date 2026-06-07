@@ -52,4 +52,8 @@ class EventLoop:
             self.broker.execute_order(event)
         elif event.type == 'FILL':
             self.portfolio.on_fill(event)
+        elif event.type == 'CANCEL':
+            self.broker.cancel(event.order_id)
+        elif event.type == 'STATUS':
+            self.portfolio.on_status(event)
 

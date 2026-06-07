@@ -21,7 +21,7 @@ portfolio simply trusts the fill price and commission the broker reports.
 
 from dataclasses import dataclass
 
-from engine.events import OrderEvent
+from engine.events import OrderEvent, CancelEvent
 
 
 @dataclass
@@ -55,6 +55,8 @@ class Portfolio:
         self.trades = []             # list of Trade records, one per closing sell
         self.bars_total = 0          # bars marked
         self.bars_invested = 0       # bars where at least one position was held
+        self._next_id = 0            # monotonic order-id counter
+        self.open_orders = {s: set() for s in symbols}   # working order ids per symbol
 
     def on_signal(self, event):
         """SignalEvent -> translate the target stance into a target position,
@@ -69,7 +71,15 @@ class Portfolio:
             target = full if stance == "LONG" else -full
         else:
             return
+        # supersede any still-working orders for this symbol before issuing new ones
+        for oid in list(self.open_orders[symbol]):
+            self.events.put(CancelEvent(oid))
         self._move_to_target(symbol, target)
+
+    def on_status(self, event):
+        """OrderStatusEvent -> drop closed orders from the working set."""
+        if event.status in ("FILLED", "CANCELLED", "REJECTED"):
+            self.open_orders[event.symbol].discard(event.order_id)
 
     def _move_to_target(self, symbol, target):
         """Emit order(s) to move from the current position to `target`. A sign
@@ -84,12 +94,16 @@ class Portfolio:
         else:
             self._emit_order(symbol, target - current)  # single delta
 
-    def _emit_order(self, symbol, delta):
-        """Queue a market order for a signed share delta (+buy / -sell)."""
+    def _emit_order(self, symbol, delta, order_type="MKT", limit_price=None, tif="GTC"):
+        """Queue an order for a signed share delta (+buy / -sell), tagged with a
+        fresh id and recorded as a working order so it can be cancelled later."""
         if delta == 0:
             return
+        self._next_id += 1
+        self.open_orders[symbol].add(self._next_id)
         direction = "BUY" if delta > 0 else "SELL"
-        self.events.put(OrderEvent(symbol, "MKT", abs(delta), direction))
+        self.events.put(OrderEvent(symbol, order_type, abs(delta), direction,
+                                   limit_price=limit_price, order_id=self._next_id, tif=tif))
 
     def on_fill(self, event):
         """FillEvent -> apply the trade to cash, position, and realized PnL.

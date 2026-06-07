@@ -78,3 +78,40 @@ def test_limit_buy_rests_until_price_reached():
     assert fill.type == "FILL"
     assert fill.fill_price == 95.5                   # limit price, not the open
     assert len(broker.pending_orders) == 0
+
+
+def test_day_order_cancelled_when_unfilled():
+    """A DAY order that can't fill on its one eligible bar is cancelled, not rested."""
+    handler, broker, events = build()
+    handler.update_bars()
+    events.get()                                     # drain bar 0's MarketEvent
+    # limit far below any price -> can never fill
+    broker.execute_order(OrderEvent("TEST", "LMT", quantity=1, direction="BUY",
+                                    limit_price=1.0, order_id=1, tif="DAY"))
+
+    handler.update_bars()
+    broker.process_pending_orders(events.get())      # bar 1: unfilled -> DAY expires
+
+    assert len(broker.pending_orders) == 0           # not resting
+    status = events.get()
+    assert status.type == "STATUS"
+    assert status.status == "CANCELLED"
+    assert status.order_id == 1
+
+
+def test_cancel_removes_working_order():
+    """broker.cancel pulls a resting order off the book and reports it cancelled."""
+    handler, broker, events = build()
+    handler.update_bars()
+    events.get()
+    broker.execute_order(OrderEvent("TEST", "LMT", quantity=1, direction="BUY",
+                                    limit_price=1.0, order_id=5, tif="GTC"))
+    assert len(broker.pending_orders) == 1
+
+    broker.cancel(5)
+
+    assert len(broker.pending_orders) == 0
+    status = events.get()
+    assert status.type == "STATUS"
+    assert status.status == "CANCELLED"
+    assert status.order_id == 5
