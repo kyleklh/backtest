@@ -16,10 +16,12 @@ class Event:
     pass
 
 class MarketEvent(Event):
-    """A new bar has arrived. Carries no data - readers pull the current
-    bar from the DataHandler"""
-    def __init__(self):
+    """A new bar has arrived for one symbol. Carries which symbol and when;
+    price data is pulled from the DataHandler at the cursor."""
+    def __init__(self, symbol, timestamp):
         self.type = 'MARKET'
+        self.symbol = symbol
+        self.timestamp = timestamp
 
 class SignalEvent(Event):
     """Strategy's decision: the target STANCE for a symbol, not a trade. The

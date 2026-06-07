@@ -1,25 +1,23 @@
 """Historical data handler for the event-driven engine.
 
-Owns one OHLCV dataframe per symbol and replays them in lockstep, advancing a
-single cursor that represents simulated "now". On each step it pushes a
-MarketEvent onto the shared queue to announce that a new bar is available.
+Owns one OHLCV dataframe per symbol and replays them along a shared **union**
+timeline — every date on which *any* symbol traded. A single cursor walks that
+timeline; on each step the handler emits a MarketEvent only for the symbols that
+actually printed a bar on that date. Symbols on mismatched calendars therefore
+lose no data, and no fabricated bar is ever tradeable.
 
-All symbols are aligned to a shared timeline (the intersection of their dates),
-so a single cursor indexes the same calendar bar across every symbol. Other
-components never touch the dataframes directly — they read the current bar (and
-any trailing history) through this handler, passing the symbol they want.
+Two kinds of read are deliberately separated:
+
+- TRADING reads (`get_latest_bar`, `get_latest_bars`, `get_latest_bar_value`)
+  return a symbol's *real* bars only. They're called for a symbol on its own
+  MarketEvent, so the current bar is always a genuine, just-printed bar — and
+  trailing history skips the days the symbol didn't trade.
+- VALUATION reads (`get_value`) return the last-known (forward-filled) price, so
+  the book can be marked to market on a date even for a symbol that didn't print
+  that day. Forward-filling is fine for valuation; it is never used to trade.
+
 Because every read is taken relative to the cursor, future rows are physically
 unreachable, which structurally prevents lookahead bias.
-
-DESIGN NOTE — the shared-timeline (intersection) approach is correct-by-
-construction (it never fabricates a price) but lossy: when symbols trade on
-different calendars (e.g. US equities + crypto, or mismatched holidays), it
-silently drops any bar a symbol lacks. That's fine for same-calendar equities,
-where the intersection drops essentially nothing. A FUTURE redesign for true
-mixed-frequency/mixed-calendar data would drop the single shared grid and give
-each symbol its own event stream — every symbol emits a MarketEvent only when
-it actually has a bar, and the loop merges those time-ordered streams. More
-general, but the cursor stops being a single integer, so it's a bigger change.
 """
 
 
@@ -31,29 +29,43 @@ class DataHandler:
         self.symbols = symbols
         self.events = events
 
-        # shared timeline = dates every symbol has in common, sorted
-        common = data[symbols[0]].index
+        # shared timeline = union of every symbol's dates (any symbol trading)
+        timeline = data[symbols[0]].index
         for s in symbols[1:]:
-            common = common.intersection(data[s].index)
-        self.timeline = common.sort_values()
+            timeline = timeline.union(data[s].index)
+        self.timeline = timeline.sort_values()
 
-        # reindex each symbol onto the shared timeline so one cursor position
-        # maps to the same calendar date in every symbol's dataframe
+        # raw view: reindex onto the timeline, NaN where a symbol didn't trade.
+        # valued view: forward-filled, for marking positions to market on gaps.
         self.data = {s: data[s].reindex(self.timeline) for s in symbols}
+        self.valued = {s: self.data[s].ffill() for s in symbols}
 
         self.cursor = -1            # index into timeline; -1 = nothing revealed yet
         self.continue_backtest = True
 
     def update_bars(self):
-        """Advance one bar. Push a MarketEvent, or stop if data's exhausted."""
+        """Advance one date. Emit a MarketEvent for each symbol that has a real
+        bar on this date, or stop if the timeline is exhausted."""
         self.cursor += 1
         if self.cursor >= len(self.timeline):
             self.continue_backtest = False
             return
-        self.events.put(MarketEvent())
+        date = self.timeline[self.cursor]
+        for s in self.symbols:
+            if not self._is_missing(s):
+                self.events.put(MarketEvent(s, date))
 
+    def _is_missing(self, symbol):
+        """True if `symbol` has no real bar at the cursor (didn't trade that date)."""
+        return bool(self.data[symbol].iloc[self.cursor].isna().any())
+
+    def current_date(self):
+        """The current timeline date (independent of any one symbol)."""
+        return self.timeline[self.cursor]
+
+    # --- trading reads: a symbol's real bars only -------------------------------
     def get_latest_bar(self, symbol):
-        """The current bar (a pandas row) for one symbol."""
+        """The symbol's current bar (a pandas row)."""
         return self.data[symbol].iloc[self.cursor]
 
     def get_latest_bar_value(self, symbol, field):
@@ -61,7 +73,13 @@ class DataHandler:
         return self.data[symbol].iloc[self.cursor][field]
 
     def get_latest_bars(self, symbol, n=1):
-        """The last n bars of one symbol up to the cursor — for strategies
-        needing history (like the MA crossover). Never returns future rows."""
-        start = max(0, self.cursor - n + 1)
-        return self.data[symbol].iloc[start:self.cursor + 1]
+        """The last n *real* bars of one symbol up to the cursor (days the symbol
+        didn't trade are skipped). Never returns future rows."""
+        history = self.data[symbol].iloc[:self.cursor + 1].dropna()
+        return history.iloc[-n:]
+
+    # --- valuation read: last-known price, forward-filled -----------------------
+    def get_value(self, symbol, field="close"):
+        """Last-known value for marking to market, even on a date the symbol
+        didn't trade. NaN only before the symbol's first-ever bar."""
+        return self.valued[symbol].iloc[self.cursor][field]

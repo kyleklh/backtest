@@ -28,8 +28,12 @@ class SimulatedBroker:
         if not self.pending_orders:
             return
 
+        symbol = market_event.symbol
         still_pending = []
         for order in self.pending_orders:
+            if order.symbol != symbol:
+                still_pending.append(order)        # not this symbol's bar — leave it
+                continue
             bar = self.data_handler.get_latest_bar(order.symbol)
             fill_price = self._fill_price(order, bar)
             if fill_price is not None:

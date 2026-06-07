@@ -134,11 +134,15 @@ timing), and a full end-to-end smoke test.
 
 These are deliberate choices, not oversights:
 
-- **Shared-timeline alignment** uses the *intersection* of symbols' dates —
-  correct-by-construction (never fabricates a price) but lossy across mismatched
-  calendars. True mixed-frequency support would use per-symbol event streams.
+- **Multi-symbol timeline** is the *union* of symbols' dates: a symbol only
+  signals/trades on dates it actually printed a bar (no fabricated bars), while
+  positions are marked to market at the last-known close on gap days. One cursor
+  walks the shared daily timeline — true intraday/mixed-frequency data would need
+  per-symbol streams at sub-daily resolution.
 - **Equal-split sizing** allocates `current_equity / N` per symbol. A single cash
   pool, not per-symbol sub-accounts.
-- **Limit orders rest GTC** (good-till-cancelled) — they never expire.
+- **Order lifecycle** supports time-in-force (GTC/DAY/GTD) and cancellation;
+  partial fills (volume-limited) are not modeled — an order fills in full or not
+  at all.
 - **Risk-free rate** is the time-varying 13-week T-bill yield (`^IRX`); metrics also
   accept a constant if you prefer.

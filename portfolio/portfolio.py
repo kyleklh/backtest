@@ -153,15 +153,19 @@ class Portfolio:
         self.cash -= signed * price + comm
 
     def current_equity(self):
-        """Total mark-to-market value: cash + every holding at its latest close."""
+        """Total mark-to-market value: cash + every holding at its last-known
+        close. Flat symbols are skipped (so a symbol that hasn't started trading
+        yet, whose price is still NaN, can't poison the total)."""
         equity = self.cash
         for s in self.symbols:
-            equity += self.position[s] * self.data_handler.get_latest_bar_value(s, 'close')
+            if self.position[s] == 0:
+                continue
+            equity += self.position[s] * self.data_handler.get_value(s, 'close')
         return equity
 
     def update_market(self, event):
-        """MarketEvent -> mark the whole book to market and record equity."""
-        date = self.data_handler.get_latest_bar(self.symbols[0]).name
+        """End of a timeline date -> mark the whole book and record equity."""
+        date = self.data_handler.current_date()
         self.equity_curve.append((date, self.current_equity()))
         self.bars_total += 1
         if any(self.position[s] != 0 for s in self.symbols):
@@ -189,6 +193,8 @@ class Portfolio:
     def unrealized_pnl(self):
         total = 0.0
         for s in self.symbols:
-            price = self.data_handler.get_latest_bar_value(s, 'close')
+            if self.position[s] == 0:
+                continue
+            price = self.data_handler.get_value(s, 'close')
             total += self.position[s] * (price - self.avg_cost[s])
         return total

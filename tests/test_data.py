@@ -30,3 +30,42 @@ def test_get_latest_bars_never_returns_future_rows():
 
     assert len(bars) == 3                       # only as many as revealed
     assert bars.iloc[-1]["close"] == handler.data["TEST"].iloc[2]["close"]   # last bar = cursor's bar
+
+
+def _mk(values, dates):
+    return pd.DataFrame({"open": values, "high": values, "low": values,
+                         "close": values, "volume": [1] * len(values)}, index=dates)
+
+
+def test_union_timeline_emits_only_real_bars():
+    # AAA trades all 4 days; BBB is missing the 2nd day
+    idx = pd.date_range("2020-01-01", periods=4)
+    data = {"AAA": _mk([10, 11, 12, 13], idx),
+            "BBB": _mk([50, 53, 60], idx[[0, 2, 3]])}
+    events = queue.Queue()
+    handler = DataHandler(data, ["AAA", "BBB"], events)
+
+    assert len(handler.timeline) == 4           # union keeps every date (intersection = 3)
+
+    emitted = {"AAA": 0, "BBB": 0}
+    while handler.continue_backtest:
+        handler.update_bars()
+        while not events.empty():
+            emitted[events.get().symbol] += 1
+
+    assert emitted["AAA"] == 4                   # one MarketEvent per real bar
+    assert emitted["BBB"] == 3                   # no fabricated bar on BBB's gap day
+
+
+def test_valuation_forward_fills_on_a_gap():
+    idx = pd.date_range("2020-01-01", periods=3)
+    data = {"AAA": _mk([10, 11, 12], idx),
+            "BBB": _mk([50, 60], idx[[0, 2]])}   # BBB skips the middle day
+    handler = DataHandler(data, ["AAA", "BBB"], queue.Queue())
+    handler.update_bars()
+    handler.update_bars()                        # cursor -> 1 (BBB's gap)
+
+    # no real bar to trade...
+    assert handler.data["BBB"].iloc[1].isna().any()
+    # ...but the position can still be valued at the last-known close
+    assert handler.get_value("BBB", "close") == 50

@@ -20,6 +20,10 @@ class EventLoop:
         self.portfolio = portfolio
         self.broker = broker
         self.events = events
+        # route a symbol's MarketEvent only to the strategies watching it
+        self.strategies_by_symbol = {}
+        for strategy in strategies:
+            self.strategies_by_symbol.setdefault(strategy.symbol, []).append(strategy)
 
     def run(self):
         while self.data_handler.continue_backtest:
@@ -43,8 +47,8 @@ class EventLoop:
     def _route(self, event):
         """Route an event to the right component."""
         if event.type == 'MARKET':
-            self.broker.process_pending_orders(event)   # fill any pending orders first
-            for strategy in self.strategies:            # fan out to every symbol's strategy
+            self.broker.process_pending_orders(event)   # fill this symbol's pending orders first
+            for strategy in self.strategies_by_symbol.get(event.symbol, []):
                 strategy.calculate_signals(event)
         elif event.type == 'SIGNAL':
             self.portfolio.on_signal(event)
