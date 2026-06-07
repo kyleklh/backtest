@@ -115,3 +115,84 @@ def test_cancel_removes_working_order():
     assert status.type == "STATUS"
     assert status.status == "CANCELLED"
     assert status.order_id == 5
+
+
+def build_vol(volume, participation, n=4):
+    """Flat-price fixture with a fixed per-bar volume, so a volume-participation
+    cap forces partial fills. Zero costs to keep arithmetic clean."""
+    prices = [100] * n
+    df = pd.DataFrame({
+        "open": prices, "high": [p + 1 for p in prices], "low": [p - 1 for p in prices],
+        "close": prices, "volume": [volume] * n,
+    }, index=pd.date_range("2020-01-01", periods=n))
+    events = queue.Queue()
+    handler = DataHandler({"TEST": df}, ["TEST"], events)
+    broker = SimulatedBroker(handler, events, commission_rate=0.0, slippage_rate=0.0,
+                             max_participation=participation)
+    return handler, broker, events
+
+
+def test_market_order_fills_partially_over_bars():
+    handler, broker, events = build_vol(volume=100, participation=0.5)   # cap = 50/bar
+    handler.update_bars()
+    events.get()
+    broker.execute_order(OrderEvent("TEST", "MKT", 120, "BUY", order_id=1, tif="GTC"))
+
+    # bar 1: takes 50, no terminal status yet, rests with 50 filled
+    handler.update_bars()
+    broker.process_pending_orders(events.get())
+    assert events.get().quantity == 50
+    assert events.empty()
+    assert broker.pending_orders[0].filled_qty == 50
+
+    # bar 2: another 50
+    handler.update_bars()
+    broker.process_pending_orders(events.get())
+    assert events.get().quantity == 50
+
+    # bar 3: final 20 -> FILLED
+    handler.update_bars()
+    broker.process_pending_orders(events.get())
+    assert events.get().quantity == 20
+    status = events.get()
+    assert status.status == "FILLED"
+    assert len(broker.pending_orders) == 0
+
+
+def test_ioc_fills_available_then_cancels_remainder():
+    handler, broker, events = build_vol(volume=100, participation=0.5)   # cap = 50
+    handler.update_bars()
+    events.get()
+    broker.execute_order(OrderEvent("TEST", "MKT", 120, "BUY", order_id=2, tif="IOC"))
+
+    handler.update_bars()
+    broker.process_pending_orders(events.get())
+    assert events.get().quantity == 50                  # filled what it could
+    assert events.get().status == "CANCELLED"           # remainder killed immediately
+    assert len(broker.pending_orders) == 0
+
+
+def test_fok_cancels_entirely_when_it_cannot_fill_all():
+    handler, broker, events = build_vol(volume=100, participation=0.5)   # cap = 50 < 120
+    handler.update_bars()
+    events.get()
+    broker.execute_order(OrderEvent("TEST", "MKT", 120, "BUY", order_id=3, tif="FOK"))
+
+    handler.update_bars()
+    broker.process_pending_orders(events.get())
+    status = events.get()
+    assert status.status == "CANCELLED"
+    assert events.empty()                               # no partial fill happened
+    assert len(broker.pending_orders) == 0
+
+
+def test_fok_fills_when_capacity_allows():
+    handler, broker, events = build_vol(volume=100, participation=1.0)   # cap = 100 >= 80
+    handler.update_bars()
+    events.get()
+    broker.execute_order(OrderEvent("TEST", "MKT", 80, "BUY", order_id=4, tif="FOK"))
+
+    handler.update_bars()
+    broker.process_pending_orders(events.get())
+    assert events.get().quantity == 80
+    assert events.get().status == "FILLED"

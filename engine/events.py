@@ -43,8 +43,9 @@ class OrderEvent(Event):
         self.direction = direction      # 'BUY' or 'SELL'
         self.limit_price = limit_price  # required for "LMT"; ignored for "MKT"
         self.order_id = order_id        # set by the portfolio; lets the order be cancelled
-        self.tif = tif                  # time-in-force: "GTC" | "DAY" | "GTD"
+        self.tif = tif                  # time-in-force: "GTC" | "DAY" | "GTD" | "IOC" | "FOK"
         self.expire_date = expire_date  # only for "GTD"
+        self.filled_qty = 0             # shares filled so far (for partial fills)
 
 
 class CancelEvent(Event):

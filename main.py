@@ -42,7 +42,8 @@ def run_backtest(data, strategy_factory, cfg):
                           slippage_rate=cfg.slippage_rate)
     broker = SimulatedBroker(data_handler, events,
                              commission_rate=cfg.commission_rate,
-                             slippage_rate=cfg.slippage_rate)
+                             slippage_rate=cfg.slippage_rate,
+                             max_participation=cfg.max_participation)
 
     loop = EventLoop(data=data_handler, strategies=strategies,
                      portfolio=portfolio, broker=broker, events=events)

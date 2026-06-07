@@ -7,12 +7,14 @@ without touching fill logic.
 from engine.events import FillEvent, OrderStatusEvent
 
 class SimulatedBroker:
-    def __init__(self, data_handler, events, commission_rate=0.001, slippage_rate=0.0005):
+    def __init__(self, data_handler, events, commission_rate=0.001, slippage_rate=0.0005,
+                 max_participation=1.0):
         self.data_handler = data_handler
         self.events = events
         self.commission_rate = commission_rate
         self.slippage_rate = slippage_rate
-        self.pending_orders = []           # NEW: orders waiting for the next bar
+        self.max_participation = max_participation   # cap on share of bar volume
+        self.pending_orders = []           # orders waiting to (continue to) fill
 
     def execute_order(self, event):
         """Receive an OrderEvent — just queue it, fill happens next bar."""
@@ -21,10 +23,10 @@ class SimulatedBroker:
         self.pending_orders.append(event)
 
     def process_pending_orders(self, market_event):
-        """Called on each MarketEvent. Try to fill pending orders against THIS
-        bar. Market orders fill at the open; limit orders fill only if the bar
-        reached the limit. An order that doesn't fill is kept or cancelled
-        according to its time-in-force (GTC rests, DAY/expired-GTD cancel)."""
+        """Called on each MarketEvent. Try to (continue to) fill this symbol's
+        orders against THIS bar. A fill takes at most a capped share of the
+        bar's volume, so a large order fills partially over several bars. The
+        unfilled remainder is kept or cancelled per time-in-force."""
         if not self.pending_orders:
             return
 
@@ -34,27 +36,58 @@ class SimulatedBroker:
             if order.symbol != symbol:
                 still_pending.append(order)        # not this symbol's bar — leave it
                 continue
+
             bar = self.data_handler.get_latest_bar(order.symbol)
             fill_price = self._fill_price(order, bar)
-            if fill_price is not None:
-                commission = order.quantity * fill_price * self.commission_rate
-                self.events.put(FillEvent(
-                    symbol=order.symbol,
-                    timestamp=bar.name,
-                    quantity=order.quantity,
-                    direction=order.direction,
-                    fill_price=fill_price,
-                    commission=commission,
-                ))
-                self.events.put(OrderStatusEvent(order.order_id, order.symbol, "FILLED"))
-                continue                            # filled -> leaves the book
+            remaining = order.quantity - order.filled_qty
 
-            # not filled this bar -> apply time-in-force
-            if order.tif == "GTC" or (order.tif == "GTD" and bar.name <= order.expire_date):
-                still_pending.append(order)         # keep resting
-            else:                                   # DAY, or GTD past its date
-                self.events.put(OrderStatusEvent(order.order_id, order.symbol, "CANCELLED"))
+            if fill_price is None:                 # limit not reached — no fill this bar
+                if self._rests(order, bar):
+                    still_pending.append(order)
+                else:
+                    self._cancel(order)            # DAY / IOC / FOK / expired GTD
+                continue
+
+            capacity = int(self.max_participation * bar["volume"])
+            if order.tif == "FOK" and capacity < remaining:
+                self._cancel(order)                # all-or-nothing, can't do all -> kill
+                continue
+
+            fill_qty = min(remaining, capacity)
+            if fill_qty > 0:
+                self._emit_fill(order, bar, fill_price, fill_qty)
+                order.filled_qty += fill_qty
+                remaining -= fill_qty
+
+            if remaining <= 0:
+                self.events.put(OrderStatusEvent(order.order_id, order.symbol, "FILLED"))
+            elif self._rests(order, bar):
+                still_pending.append(order)        # partially filled -> rest for more
+            else:
+                self._cancel(order)                # IOC / DAY remainder -> cancel
         self.pending_orders = still_pending
+
+    def _rests(self, order, bar):
+        """Whether an order with an unfilled remainder stays on the book."""
+        if order.tif == "GTC":
+            return True
+        if order.tif == "GTD":
+            return bar.name <= order.expire_date
+        return False                               # DAY, IOC, FOK
+
+    def _cancel(self, order):
+        self.events.put(OrderStatusEvent(order.order_id, order.symbol, "CANCELLED"))
+
+    def _emit_fill(self, order, bar, fill_price, qty):
+        commission = qty * fill_price * self.commission_rate
+        self.events.put(FillEvent(
+            symbol=order.symbol,
+            timestamp=bar.name,
+            quantity=qty,
+            direction=order.direction,
+            fill_price=fill_price,
+            commission=commission,
+        ))
 
     def cancel(self, order_id):
         """Remove a working order from the book and report it cancelled."""
